@@ -1,6 +1,7 @@
 # Secreto
 
 Secreto is a gem to get password information from Thycotic Secret Server
+[![Gem Version](https://badge.fury.io/rb/secreto.svg)](https://rubygems.org/gems/secreto)
 
 ## Installation
 
