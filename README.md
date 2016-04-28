@@ -20,4 +20,5 @@ secretserver = "Secret Server"
 secretServer = Secreto.new('https://' + secretserver + '/SecretServer/webservices/SSWebService.asmx?WSDL', ':none', ':TLSv1')
 token = secretServer.Authenticate(username,password,ad)
 puts secretServer.GetSecretByHostName("name of item to search","Machine")
+puts secretServer.createSecret("Folder Name","Password","Name",["Resource","Username","Password","Notes"],["Resource Name","root","password","This is secret"])
 ```
