@@ -3,8 +3,15 @@ require 'nokogiri'
 require 'crack'
 require 'json'
 
+# Secreto is a ruby class to interact with Thycotic Secret Server
+# == Supported Operations
+# * Login
+# * Retrieve a secret
+# * Add a Secret
+# * Add a Folder
 class Secreto
 
+  # Constructor
   def initialize(wsdl, ssl_verify_mode, ssl_version)
     @@wsdl=wsdl
     @@ssl_verify_mode=ssl_verify_mode
@@ -13,6 +20,13 @@ class Secreto
     @@secretTemplates = []
   end
 
+  # Authenticates with Secret Server
+  #
+  # ==== Attributes
+  #
+  # * +username+ - Username for secret Server
+  # * +password+ - Password
+  # * +domain+   - Domain Name
   def Authenticate(username, password, domain)
     client = Savon.client(wsdl: @@wsdl, ssl_verify_mode: :none, ssl_version: :TLSv1)
 
@@ -93,6 +107,13 @@ class Secreto
     })
     return response
   end
+  
+  # Retrieve the secret Details
+  # 
+  # ==== Attributes
+  # 
+  # * +hostName+   - Name of the Secret to search
+  # * +objectType+ - Object Type. For example Machine 
   def GetSecretByHostName(hostName,objectType)
 	thesame = lambda { |key| hostName }	
     client = Savon.client(wsdl: @@wsdl, ssl_verify_mode: :none, ssl_version: :TLSv1, convert_request_keys_to: :none)
@@ -109,26 +130,33 @@ class Secreto
       end
     end
   end
+
+  # Create a Folder
+  # 
+  # ==== Attributes
+  # 
+  # * +folderName+   - Name of the folder you want to create
+  # * +parentFolder+ - Parent Folder Name (Give full path /TOPLEVEL/Folder 1/Folder 2 
   def createFolder(folderName,parentFolder)
 	thesame = lambda { |key| hostName }	
     client = Savon.client(wsdl: @@wsdl, ssl_verify_mode: :none, ssl_version: :TLSv1, convert_request_keys_to: :none)
-    parent = getFolder(parentFolder)
-    if parent.nil?
+    parentId = getFolder(parentFolder)
+    if parentId.nil?
       print "Parent Folder " + parentFolder + " doesn't exist"
       return nil
     else
       response = client.call(:folder_create, message: {
         token: @@token,
         folderName: folderName,
-        parentFolderId: parent["id"],
+        parentFolderId: parentId,
         folderTypeId: 1
       })
       doc = Nokogiri::XML.parse(response.to_xml)
       puts doc
     end
   end
+
   def getFolder(folderName)
-	thesame = lambda { |key| hostName }	
     client = Savon.client(wsdl: @@wsdl, ssl_verify_mode: :none, ssl_version: :TLSv1, convert_request_keys_to: :none)
     response = client.call(:search_folders, message: {
       token: @@token,
@@ -136,7 +164,12 @@ class Secreto
     })
     doc = Nokogiri::XML.parse(response.to_xml)
     items = doc.xpath('//foo:Folder', 'foo' =>  'urn:thesecretserver.com')
-    if not items[0].nil?
+    if items.length > 1
+      print "The folder " + folderName + " could not be identified uniquely " +
+            "Consider specifying full path like /TOPLEVEL/Level 1/Level 2/Folder Name" + "\n"
+      return nil
+     else
+     if not items[0].nil?
       node = Hash.new
       for child in items[0].children
         if child.name == "Name"
@@ -149,7 +182,43 @@ class Secreto
           node["parentFolderId"] = child.content
         end
       end
-      return node
+      return node["Id"]
+     end
+    end
+    if folderName.include?"/"
+      normalizedFolderName = folderName
+      if folderName.start_with?("/")
+        normalizedFolderName = folderName.sub("/","")
+      end
+      splitted = normalizedFolderName.split("/")
+      $i = 0
+      parentId = -1
+      while $i < splitted.length do
+        parentId = getFolderId(splitted[$i],parentId)
+        $i+=1
+      end
+      return parentId
+    end
+    return nil
+  end
+
+  def getFolderId(folderName,parentFolderId)
+    client = Savon.client(wsdl: @@wsdl, ssl_verify_mode: :none, ssl_version: :TLSv1, convert_request_keys_to: :none)
+    
+    response = client.call(:folder_get_all_children, message: {
+      token: @@token,
+      parentFolderId:parentFolderId,
+    })
+    doc = Nokogiri::XML.parse(response.to_xml)
+    items = doc.xpath('//foo:Folder', 'foo' =>  'urn:thesecretserver.com')
+    for item in items
+      node = Hash.new
+      for child in item.children
+        node[child.name] = child.content
+      end
+      if node["Name"] == folderName
+        return node["Id"]
+      end
     end
     return nil
   end
@@ -167,6 +236,15 @@ class Secreto
     return nil
   end
 
+  # Create a Secret
+  # 
+  # ==== Attributes
+  # 
+  # * +folderName+  - Folder Name where secret will be added (Give full path /TOPLEVEL/Folder 1/Folder 2 
+  # * +secretType+  - Secret Type For ex Password/Active Directory Account
+  # * +secretName+  - Name of Secret
+  # * +fieldKeys+   - List of Items in secret
+  # * +fieldValues+ - Value of secret Items
   def createSecret(folderName,secretType,secretName,fieldKeys,fieldValues)
     if fieldKeys.length != fieldValues.length
       print "For each key there should be a value [" + fieldKeys.join(",") + " != " + fieldValues.join(",") + "]\n"
@@ -228,7 +306,7 @@ class Secreto
       '      <ns1:secretName>' + secretName + '</ns1:secretName>' + 
       secretFieldIds +
       secretItemValues +
-      '      <ns1:folderId>' + folderId["id"] + '</ns1:folderId>' +
+      '      <ns1:folderId>' + folderId + '</ns1:folderId>' +
       '    </ns1:token>' +
       '    </ns1:AddSecret>' +
       '  </ns0:Body>' +
